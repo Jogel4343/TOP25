@@ -4,6 +4,17 @@ Top25 Talent is a recruiting marketplace for verified students and alumni from t
 
 Built by a UVA economics student as a solo MVP.
 
+**Live demo**: https://top-25-two.vercel.app
+
+## Status
+
+This is a portfolio MVP — feature-complete end-to-end but not actively maintained or marketed. It demonstrates a production-grade Next.js 14 + Supabase + Stripe build with school-email verification, RLS-protected candidate data, and webhook-driven job activation.
+
+**Known limitations:**
+- The candidate signup flow occasionally writes `domain_outcome: unknown_domain` to user metadata even for valid school domains. The dashboard self-heals via service-role lookup, so users are not blocked, but the underlying domain-check insert needs a follow-up fix.
+- Resume uploads work locally and in production once storage RLS policies are applied (see `supabase/migrations/`).
+- Header session refresh requires a hard navigation after OTP verification (handled via `window.location.assign`).
+
 ---
 
 ## Tech Stack
