@@ -9,6 +9,15 @@ drop schema if exists public cascade;
 create schema public;
 grant usage on schema public to anon, authenticated, service_role;
 grant all on schema public to postgres, service_role;
+
+-- Default privileges for any tables/sequences created in this script.
+-- RLS policies (defined later) still filter row visibility.
+alter default privileges in schema public
+  grant select on tables to anon, authenticated;
+alter default privileges in schema public
+  grant insert, update, delete on tables to authenticated;
+alter default privileges in schema public
+  grant usage, select on sequences to authenticated;
 delete from auth.users where id in (
   '00000000-0000-0000-0000-000000000001',
   '00000000-0000-0000-0000-000000000002',
