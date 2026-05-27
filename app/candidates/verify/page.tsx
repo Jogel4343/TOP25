@@ -12,6 +12,24 @@ import { createClient } from '@/lib/supabase/client'
 
 type VerifyState = 'idle' | 'loading' | 'success' | 'error'
 
+/**
+ * Polls until supabase.auth.getSession() returns a session, or times out.
+ * After verifyOtp() succeeds the cookie write is async; this ensures the
+ * session is fully established before we make authenticated server calls.
+ */
+async function waitForSession(
+  supabase: ReturnType<typeof createClient>,
+  timeoutMs = 3000
+): Promise<boolean> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session) return true
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  return false
+}
+
 export default function CandidateVerifyPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -59,20 +77,41 @@ export default function CandidateVerifyPage() {
     }
 
     if (data.user) {
-      // Call finalize route to upsert candidate profile
-      try {
-        const response = await fetch('/api/candidates/finalize', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        })
+      // Wait for session cookies to be fully written by @supabase/ssr before
+      // calling the finalize route. The cookie write is async after verifyOtp
+      // resolves, so an immediate fetch can race the cookie write and get 401.
+      await waitForSession(supabase)
 
-        if (!response.ok) {
-          console.error('Finalize failed:', await response.text())
-          // Still redirect — user is authenticated, profile might already exist
+      // Call finalize route to upsert candidate profile, with retry on 401
+      // to handle any residual cookie-propagation delay.
+      let finalizeOk = false
+      for (let attempt = 0; attempt < 4 && !finalizeOk; attempt++) {
+        try {
+          const response = await fetch('/api/candidates/finalize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            cache: 'no-store',
+          })
+          if (response.ok) {
+            finalizeOk = true
+            break
+          }
+          if (response.status === 401) {
+            // Cookies not yet visible to server route — back off and retry
+            await new Promise((r) => setTimeout(r, 400 * (attempt + 1)))
+            continue
+          }
+          console.error('Finalize failed:', response.status, await response.text())
+          break
+        } catch (err) {
+          console.error('Finalize fetch error:', err)
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)))
         }
-      } catch (err) {
-        console.error('Finalize fetch error:', err)
       }
+
+      // Even if finalize didn't succeed here, the dashboard will self-heal
+      // by running finalize server-side for authenticated users without a profile.
 
       setState('success')
       toast({

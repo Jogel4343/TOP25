@@ -7,17 +7,64 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { getEmployerProfile, getUser } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { formatDate, roleTypeLabel, workplaceLabel, daysUntil } from '@/lib/utils'
 import type { Job } from '@/lib/supabase/types'
 
 export const metadata: Metadata = { title: 'Employer Dashboard' }
 
+/**
+ * Self-heal: if an authenticated employer-intent user reaches the dashboard
+ * without an employer_profile, create it from their user_metadata.
+ */
+async function ensureEmployerProfile(userId: string) {
+  const admin = createAdminClient()
+
+  const { data: existing } = await admin
+    .from('employer_profiles')
+    .select('id')
+    .eq('auth_user_id', userId)
+    .maybeSingle()
+  if (existing) return true
+
+  const { data: userResp } = await admin.auth.admin.getUserById(userId)
+  const authUser = userResp?.user
+  if (!authUser) return false
+
+  const meta = (authUser.user_metadata ?? {}) as {
+    intent?: string
+    company_name?: string
+    website_url?: string | null
+    work_email?: string
+  }
+  if (meta.intent !== 'employer') return false
+
+  const { error } = await admin.from('employer_profiles').upsert(
+    {
+      auth_user_id: userId,
+      company_name: meta.company_name ?? 'My Company',
+      work_email: authUser.email ?? meta.work_email ?? '',
+      website_url: meta.website_url ?? null,
+    },
+    { onConflict: 'auth_user_id' }
+  )
+  if (error) {
+    console.error('Self-heal employer profile failed:', error)
+    return false
+  }
+  return true
+}
+
 export default async function EmployerDashboardPage() {
   const user = await getUser()
   if (!user) redirect('/employers/signup')
 
-  const profile = await getEmployerProfile()
-  if (!profile) redirect('/employers/signup')
+  let profile = await getEmployerProfile()
+  if (!profile) {
+    const healed = await ensureEmployerProfile(user.id)
+    if (healed) profile = await getEmployerProfile()
+    if (!profile) redirect('/employers/signup')
+  }
 
   const supabase = createClient()
 

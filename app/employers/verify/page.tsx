@@ -12,6 +12,19 @@ import { createClient } from '@/lib/supabase/client'
 
 type VerifyState = 'idle' | 'loading' | 'success' | 'error'
 
+async function waitForSession(
+  supabase: ReturnType<typeof createClient>,
+  timeoutMs = 3000
+): Promise<boolean> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session) return true
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  return false
+}
+
 export default function EmployerVerifyPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -55,7 +68,10 @@ export default function EmployerVerifyPage() {
     }
 
     if (data.user) {
-      // Create employer profile
+      // Wait for session cookies to be written before navigating
+      await waitForSession(supabase)
+
+      // Create employer profile (dashboard also self-heals if this fails)
       const meta = data.user.user_metadata as {
         intent?: string
         company_name?: string
@@ -64,16 +80,19 @@ export default function EmployerVerifyPage() {
       }
 
       if (meta.intent === 'employer') {
-        const supabase2 = createClient()
-        await supabase2.from('employer_profiles').upsert(
-          {
-            auth_user_id: data.user.id,
-            company_name: meta.company_name ?? 'My Company',
-            work_email: data.user.email ?? meta.work_email ?? '',
-            website_url: meta.website_url ?? null,
-          },
-          { onConflict: 'auth_user_id', ignoreDuplicates: false }
-        )
+        try {
+          await supabase.from('employer_profiles').upsert(
+            {
+              auth_user_id: data.user.id,
+              company_name: meta.company_name ?? 'My Company',
+              work_email: data.user.email ?? meta.work_email ?? '',
+              website_url: meta.website_url ?? null,
+            },
+            { onConflict: 'auth_user_id', ignoreDuplicates: false }
+          )
+        } catch (err) {
+          console.error('Employer profile upsert error:', err)
+        }
       }
 
       setState('success')

@@ -8,19 +8,116 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { VerificationBadge } from '@/components/verification-badge'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { getCandidateProfile, getUser } from '@/lib/auth'
+import type { VerificationStatus } from '@/lib/supabase/types'
 import { formatDate, roleTypeLabel, workplaceLabel } from '@/lib/utils'
 import { ResumeUpload } from './resume-upload'
 import { EditProfileForm } from './edit-profile-form'
 
 export const metadata: Metadata = { title: 'Candidate Dashboard' }
 
+/**
+ * Self-heal: if an authenticated user reaches the dashboard without a
+ * candidate_profile row, create it from their user_metadata. This handles
+ * the rare case where the client-side finalize call failed (e.g. cookie race
+ * during OTP verification).
+ */
+async function ensureCandidateProfile(userId: string) {
+  const admin = createAdminClient()
+
+  // Re-check via admin client (bypasses RLS)
+  const { data: existing } = await admin
+    .from('candidate_profiles')
+    .select('id')
+    .eq('auth_user_id', userId)
+    .maybeSingle()
+
+  if (existing) return true
+
+  // Look up the auth user to read metadata + email
+  const { data: userResp } = await admin.auth.admin.getUserById(userId)
+  const authUser = userResp?.user
+  if (!authUser) return false
+
+  const meta = (authUser.user_metadata ?? {}) as {
+    intent?: string
+    school_id?: string
+    full_name?: string
+    graduation_year?: number
+    major?: string
+    linkedin_url?: string | null
+    domain_outcome?: string
+    verification_type?: string
+  }
+
+  // Only auto-create for candidate-intent signups
+  if (meta.intent !== 'candidate') return false
+
+  const domainOutcome = meta.domain_outcome ?? 'unknown_domain'
+  let verificationStatus: VerificationStatus
+  let isSearchable = false
+  switch (domainOutcome) {
+    case 'auto_verify_student':
+      verificationStatus = 'verified_student'
+      isSearchable = true
+      break
+    case 'auto_verify_alumni':
+      verificationStatus = 'verified_alumni'
+      isSearchable = true
+      break
+    default:
+      verificationStatus = 'manual_review'
+      isSearchable = false
+  }
+
+  const { error: upsertError } = await admin
+    .from('candidate_profiles')
+    .upsert(
+      {
+        auth_user_id: userId,
+        full_name: meta.full_name ?? authUser.email ?? 'Unknown',
+        school_id: meta.school_id ?? null,
+        email: authUser.email ?? '',
+        graduation_year: meta.graduation_year ?? null,
+        major: meta.major ?? null,
+        linkedin_url: meta.linkedin_url ?? null,
+        verification_status: verificationStatus,
+        verification_type: meta.verification_type ?? 'unknown',
+        is_searchable: isSearchable,
+      },
+      { onConflict: 'auth_user_id' }
+    )
+
+  if (upsertError) {
+    console.error('Self-heal candidate profile failed:', upsertError)
+    return false
+  }
+
+  await admin.from('verification_events').insert({
+    email: authUser.email ?? '',
+    school_id: meta.school_id ?? null,
+    domain_checked: authUser.email?.split('@')[1] ?? null,
+    result: 'otp_verified_self_heal',
+    metadata: { verification_status: verificationStatus, domain_outcome: domainOutcome },
+  })
+
+  return true
+}
+
 export default async function CandidateDashboardPage() {
   const user = await getUser()
   if (!user) redirect('/candidates/signup')
 
-  const profile = await getCandidateProfile()
-  if (!profile) redirect('/candidates/signup')
+  let profile = await getCandidateProfile()
+  if (!profile) {
+    // Try to self-heal before bouncing back to signup
+    const healed = await ensureCandidateProfile(user.id)
+    if (healed) {
+      profile = await getCandidateProfile()
+    }
+    if (!profile) redirect('/candidates/signup')
+  }
 
   const supabase = createClient()
 
