@@ -97,7 +97,8 @@ export default function EmployerVerifyPage() {
 
       setState('success')
       toast({ title: 'Signed in!', description: 'Redirecting to your dashboard.' })
-      setTimeout(() => router.push('/dashboard/employer'), 1200)
+      // Hard navigation so root layout (Header) re-renders with new session cookies
+      setTimeout(() => window.location.assign('/dashboard/employer'), 1200)
     }
   }
 

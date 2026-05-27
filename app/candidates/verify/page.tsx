@@ -120,7 +120,11 @@ export default function CandidateVerifyPage() {
       })
 
       setTimeout(() => {
-        router.push('/dashboard/candidate')
+        // Force a full page navigation so the root layout's Server
+        // Components (Header) re-render with the freshly-set auth cookies.
+        // router.push() reuses the cached layout and would leave the
+        // Header stuck showing 'Sign in'.
+        window.location.assign('/dashboard/candidate')
       }, 1500)
     }
   }
