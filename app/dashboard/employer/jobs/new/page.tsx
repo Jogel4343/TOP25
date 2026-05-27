@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { getEmployerProfile } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
-import { JobForm } from '../job-form'
+import { JobForm } from '../../job-form'
 
 export const metadata: Metadata = { title: 'Post a Job' }
 

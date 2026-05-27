@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { PRICING, type PricingConfig } from '@/lib/stripe'
+import { PRICING, type PricingConfig } from '@/lib/pricing'
 import type { PricingTier } from '@/lib/supabase/types'
 
 interface PricingCardsProps {
