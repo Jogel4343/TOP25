@@ -60,7 +60,7 @@ export async function Header() {
           ) : (
             <div className="hidden md:flex items-center gap-2">
               <Button variant="ghost" size="sm" asChild>
-                <Link href="/candidates/signup">Sign in</Link>
+                <Link href="/signin">Sign in</Link>
               </Button>
               <Button size="sm" asChild>
                 <Link href="/employers/signup">Post a Job</Link>
